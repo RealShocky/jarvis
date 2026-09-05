@@ -304,6 +304,20 @@ html, body {
   flex: 1;
 }
 
+.settings-hint {
+  margin: 6px 0 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.settings-restart-notice {
+  margin: 8px 0 0 0;
+  font-size: 12px;
+  text-align: right;
+  color: rgba(0, 212, 255, 0.7);
+}
+
 .settings-btn {
   padding: 7px 14px;
   border: 1px solid rgba(0, 212, 255, 0.2);

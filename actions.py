@@ -9,16 +9,9 @@ import asyncio
 import logging
 import os
 import re
-import time
-from pathlib import Path
-from urllib.parse import quote
+import shutil
 
 log = logging.getLogger("jarvis.actions")
-
-DESKTOP_PATH = Path.home() / "Desktop"
-
-_SKIP_PERMISSIONS = os.getenv("JARVIS_SKIP_PERMISSIONS", "true").lower() not in ("0", "false", "no")
-
 
 async def _mark_terminal_as_jarvis(revert_after: float = 5.0):
     """Temporarily set the front Terminal window to Ocean theme, then revert.
@@ -65,7 +58,7 @@ async def _mark_terminal_as_jarvis(revert_after: float = 5.0):
 
 async def _revert_terminal_theme(profile_name: str):
     """Revert a Terminal window back to its original profile."""
-    escaped = profile_name.replace('"', '\\"')
+    escaped = applescript_escape(profile_name)
     script = (
         'tell application "Terminal"\n'
         f'    set current settings of front window to settings set "{escaped}"\n'
@@ -121,8 +114,18 @@ async def open_terminal(command: str = "") -> dict:
 
 
 async def open_browser(url: str, browser: str = "chrome") -> dict:
-    """Open URL in user's browser (Chrome or Firefox)."""
-    escaped_url = url.replace('"', '\\"')
+    """Open URL in user's browser (Chrome or Firefox).
+
+    The URL goes through `applescript_escape` and nothing else. A hand-rolled
+    `.replace('"', ...)` lived here and escaped the quote but not the
+    BACKSLASH, which is the half that matters: AppleScript reads `\\\\` as one
+    literal backslash, so a URL ending `x\\"` closes the string literal and
+    everything after it is code — and `do shell script` is in that language.
+    The URL arrives from a model, out of speech, possibly echoing a page or a
+    README, so this is a straight line from attacker text to a shell.
+    `tests/test_applescript_url_injection.py` runs the payload.
+    """
+    escaped_url = applescript_escape(url)
 
     if browser.lower() == "firefox":
         app_name = "Firefox"
@@ -161,127 +164,6 @@ async def open_chrome(url: str) -> dict:
     return await open_browser(url, "chrome")
 
 
-async def open_claude_in_project(project_dir: str, prompt: str) -> dict:
-    """Open Terminal, cd to project dir, run Claude Code interactively.
-
-    Writes the prompt to CLAUDE.md (which claude reads automatically on startup)
-    then launches claude in interactive mode.
-    No prompt escaping needed — CLAUDE.md handles context delivery.
-    """
-    claude_md = Path(project_dir) / "CLAUDE.md"
-    claude_md.write_text(f"# Task\n\n{prompt}\n\nBuild this completely. If web app, make index.html work standalone.\n")
-
-    skip_flag = " --dangerously-skip-permissions" if _SKIP_PERMISSIONS else ""
-    escaped_dir = applescript_escape(project_dir)
-    script = (
-        'tell application "Terminal"\n'
-        "    activate\n"
-        f'    do script "cd {escaped_dir} && claude{skip_flag}"\n'
-        "end tell"
-    )
-    proc = await asyncio.create_subprocess_exec(
-        "osascript", "-e", script,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await proc.communicate()
-    success = proc.returncode == 0
-    if not success:
-        log.error(f"open_claude_in_project failed: {stderr.decode()}")
-    else:
-        await _mark_terminal_as_jarvis()
-    return {
-        "success": success,
-        "confirmation": "Claude Code is running in Terminal, sir. You can watch the progress."
-        if success
-        else "Had trouble spawning Claude Code, sir.",
-    }
-
-
-async def prompt_existing_terminal(project_name: str, prompt: str) -> dict:
-    """Find a Terminal window matching a project name and type a prompt into it.
-
-    Uses System Events keystroke to type into an active Claude Code session
-    rather than `do script` which would open a new shell.
-    """
-    escaped_name = applescript_escape(project_name)
-    escaped_prompt = applescript_escape(prompt)
-
-    # Single atomic script: find window, focus it, type into it
-    script = f'''
-tell application "Terminal"
-    set matched to false
-    set targetWindow to missing value
-    repeat with w in windows
-        if name of w contains "{escaped_name}" then
-            set targetWindow to w
-            set matched to true
-            exit repeat
-        end if
-    end repeat
-
-    if not matched then
-        return "NOT_FOUND"
-    end if
-
-    -- Bring the matched window to front
-    set index of targetWindow to 1
-    set selected tab of targetWindow to selected tab of targetWindow
-    activate
-end tell
-
--- Wait for window to be fully focused
-delay 1
-
--- Now type into it
-tell application "System Events"
-    tell process "Terminal"
-        set frontmost to true
-        delay 0.3
-        keystroke "{escaped_prompt}"
-        delay 0.2
-        keystroke return
-    end tell
-end tell
-
-return "OK"
-'''
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "osascript", "-e", script,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
-
-        result = stdout.decode().strip()
-        if result == "NOT_FOUND":
-            return {
-                "success": False,
-                "confirmation": f"Couldn't find a terminal for {project_name}, sir.",
-            }
-
-        success = proc.returncode == 0
-        if not success:
-            log.error(f"prompt_existing_terminal failed: {stderr.decode()[:200]}")
-
-        if success:
-            await _mark_terminal_as_jarvis()
-
-        return {
-            "success": success,
-            "confirmation": f"Sent that to {project_name}, sir." if success
-            else f"Had trouble typing into {project_name}, sir.",
-        }
-
-    except asyncio.TimeoutError:
-        return {"success": False, "confirmation": "Terminal operation timed out, sir."}
-    except Exception as e:
-        log.error(f"prompt_existing_terminal failed: {e}")
-        return {"success": False, "confirmation": "Something went wrong reaching that terminal, sir."}
-
-
 async def get_chrome_tab_info() -> dict:
     """Read the current Chrome tab's title and URL via AppleScript."""
     script = (
@@ -309,82 +191,60 @@ async def get_chrome_tab_info() -> dict:
         return {}
 
 
-async def monitor_build(project_dir: str, ws=None, synthesize_fn=None) -> None:
-    """Monitor a Claude Code build for completion. Notify via WebSocket when done."""
-    import base64
+# --- Opening code where the user actually reads it -----------------------
+#
+# The user's words: "maybe he should be able to open code files in VS Code or
+# text editor." VS Code first when it is installed, the system default
+# otherwise, so this still works on a Mac that has never had it.
+#
+# No AppleScript and no shell: `open` is exec'd with the path as its own argv
+# entry, so a filename cannot be quoted out of a script the way it can out of
+# an AppleScript string literal. Containment and the sensitive-file wall are
+# the CALLER's job and have already run by the time this is reached — see
+# server.tool_open_in_editor.
 
-    output_file = Path(project_dir) / ".jarvis_output.txt"
-    start = time.time()
-    timeout = 600  # 10 minutes
-
-    while time.time() - start < timeout:
-        await asyncio.sleep(5)
-        if output_file.exists():
-            content = output_file.read_text()
-            if "--- JARVIS TASK COMPLETE ---" in content:
-                log.info(f"Build complete in {project_dir}")
-                if ws and synthesize_fn:
-                    try:
-                        msg = "The build is complete, sir."
-                        audio_bytes = await synthesize_fn(msg)
-                        if audio_bytes:
-                            encoded = base64.b64encode(audio_bytes).decode()
-                            await ws.send_json({"type": "status", "state": "speaking"})
-                            await ws.send_json({"type": "audio", "data": encoded, "text": msg})
-                            await ws.send_json({"type": "status", "state": "idle"})
-                    except Exception as e:
-                        log.warning(f"Build notification failed: {e}")
-                return
-
-    log.warning(f"Build timed out in {project_dir}")
+VSCODE_APP = "/Applications/Visual Studio Code.app"
 
 
-async def execute_action(intent: dict, projects: list = None) -> dict:
-    """Route a classified intent to the right action function.
+def _vscode_command(path: str) -> list[str] | None:
+    """The argv that opens `path` in VS Code, or None if it is not installed."""
+    binary = shutil.which("code")
+    if binary:
+        return [binary, str(path)]
+    if os.path.isdir(VSCODE_APP):
+        return ["open", "-a", VSCODE_APP, str(path)]
+    return None
 
-    Args:
-        intent: {"action": str, "target": str} from classify_intent()
-        projects: list of known project dicts for resolving working dirs
 
-    Returns: {"success": bool, "confirmation": str, "project_dir": str | None}
-    """
-    action = intent.get("action", "chat")
-    target = intent.get("target", "")
+async def open_in_editor(path: str) -> dict:
+    """Open a file or directory in VS Code, else in the system default."""
+    argv = _vscode_command(path)
+    editor = "VS Code"
+    if argv is None:
+        argv = ["open", str(path)]
+        editor = "your editor"
 
-    if action == "open_terminal":
-        claude_cmd = "claude --dangerously-skip-permissions" if _SKIP_PERMISSIONS else "claude"
-        result = await open_terminal(claude_cmd)
-        result["project_dir"] = None
-        return result
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        success = proc.returncode == 0
+    except OSError as e:
+        log.error(f"open_in_editor could not launch: {e}")
+        return {"success": False, "editor": editor,
+                "confirmation": "I couldn't open an editor, sir."}
 
-    elif action == "browse":
-        if target.startswith("http://") or target.startswith("https://"):
-            url = target
-        else:
-            url = f"https://www.google.com/search?q={quote(target)}"
-
-        # Detect which browser user wants
-        target_lower = target.lower()
-        if "firefox" in target_lower:
-            browser = "firefox"
-        else:
-            browser = "chrome"
-
-        result = await open_browser(url, browser)
-        result["project_dir"] = None
-        return result
-
-    elif action == "build":
-        # Create project folder on Desktop, spawn Claude Code
-        project_name = _generate_project_name(target)
-        project_dir = str(DESKTOP_PATH / project_name)
-        os.makedirs(project_dir, exist_ok=True)
-        result = await open_claude_in_project(project_dir, target)
-        result["project_dir"] = project_dir
-        return result
-
-    else:
-        return {"success": False, "confirmation": "", "project_dir": None}
+    if not success:
+        log.error(f"open_in_editor failed: {stderr.decode(errors='replace')}")
+    return {
+        "success": success,
+        "editor": editor,
+        "confirmation": f"Opened that in {editor}, sir." if success
+        else f"{editor} wouldn't open that, sir.",
+    }
 
 
 def _generate_project_name(prompt: str) -> str:

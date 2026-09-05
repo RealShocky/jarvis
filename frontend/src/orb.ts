@@ -8,7 +8,12 @@
 
 import * as THREE from "three";
 
-export type OrbState = "idle" | "listening" | "thinking" | "speaking";
+// "compacting": the brain is being swapped for a fresh one behind the scenes
+// (a context rotation). He answers nothing for a few seconds, and silence with
+// no explanation reads as a crash. It used to be followed by a spoken line;
+// the user found that annoying, so the orb carries it instead: dim, slow,
+// drawn inward, in a cooler colour -- unmistakably not "about to answer".
+export type OrbState = "idle" | "listening" | "thinking" | "speaking" | "compacting";
 
 export interface Orb {
   setState(s: OrbState): void;
@@ -137,6 +142,11 @@ export function createOrb(canvas: HTMLCanvasElement): Orb {
       case "speaking":
         targetRadius = 18; targetSpeed = 0.2; targetBright = 0.7; targetSize = 0.4;
         targetLineAmount = 0.8; targetElectronRate = 0; break;
+      case "compacting":
+        // Smaller than idle, slower than anything, half the brightness, no
+        // connecting lines: a held breath, not a working mind.
+        targetRadius = 12; targetSpeed = 0.08; targetBright = 0.28; targetSize = 0.28;
+        targetLineAmount = 0.0; targetElectronRate = 0; break;
     }
 
     currentRadius += (targetRadius - currentRadius) * 0.02;
@@ -169,6 +179,7 @@ export function createOrb(canvas: HTMLCanvasElement): Orb {
     let zTarget = Math.sin(t * 0.12) * 8;
     if (state === "thinking") zTarget = Math.sin(t * 0.3) * 15 + Math.sin(t * 0.9) * 6;
     else if (state === "speaking") zTarget = Math.sin(t * 0.15) * 6 - bass * 10;
+    else if (state === "compacting") zTarget = -20 + Math.sin(t * 0.08) * 3;   // withdrawn, barely moving
     cloudZVel += (zTarget - cloudZ) * 0.008;
     cloudZVel *= 0.94;
     cloudZ += cloudZVel;
@@ -304,6 +315,7 @@ export function createOrb(canvas: HTMLCanvasElement): Orb {
 
     if (state === "thinking") { mat.color.lerp(new THREE.Color(0x6ec4ff), 0.015); lineMat.color.lerp(new THREE.Color(0x6ec4ff), 0.015); }
     else if (state === "speaking") { mat.color.lerp(new THREE.Color(0x5ab8f0), 0.015); lineMat.color.lerp(new THREE.Color(0x5ab8f0), 0.015); }
+    else if (state === "compacting") { mat.color.lerp(new THREE.Color(0x3a5f8a), 0.03); lineMat.color.lerp(new THREE.Color(0x3a5f8a), 0.03); }   // desaturated, cooler
     else { mat.color.lerp(new THREE.Color(0x4ca8e8), 0.015); lineMat.color.lerp(new THREE.Color(0x4ca8e8), 0.015); }
 
     camera.position.x = Math.sin(t * 0.02) * 5;

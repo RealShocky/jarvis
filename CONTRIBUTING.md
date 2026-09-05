@@ -22,7 +22,7 @@ Thanks for your interest in contributing! Here's how to get involved.
 
 ## Code Style
 
-Yes, `server.py` is a 2400-line monolith. It works. If you want to refactor parts into modules, that's welcome — just make sure nothing breaks.
+Yes, `server.py` is a 5,600-line monolith. It works. If you want to refactor parts into modules, that's welcome — just make sure nothing breaks.
 
 - Keep voice responses short (1-2 sentences max)
 - Don't add dependencies unless necessary
@@ -32,8 +32,8 @@ Yes, `server.py` is a 2400-line monolith. It works. If you want to refactor part
 ## What NOT to Do
 
 - Don't add telemetry or analytics
-- Don't send data to external services beyond the existing API calls (Anthropic, Fish Audio)
-- Don't add features that modify or delete user data in connected services (Mail, Calendar, Notes)
+- Don't send data to external services beyond the existing API calls (Fish Audio)
+- Don't add features that modify or delete user data in the services somebody has connected
 - Don't break the existing voice loop
 
 ## Reporting Issues

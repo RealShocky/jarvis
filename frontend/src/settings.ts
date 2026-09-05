@@ -11,15 +11,9 @@
 
 interface StatusResponse {
   claude_code_installed: boolean;
-  calendar_accessible: boolean;
-  mail_accessible: boolean;
-  notes_accessible: boolean;
-  memory_count: number;
-  task_count: number;
   server_port: number;
   uptime_seconds: number;
   env_keys_set: {
-    anthropic: boolean;
     fish_audio: boolean;
     fish_voice_id: boolean;
     user_name: string;
@@ -29,7 +23,6 @@ interface StatusResponse {
 interface PreferencesResponse {
   user_name: string;
   honorific: string;
-  calendar_accounts: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -39,7 +32,7 @@ interface PreferencesResponse {
 let panelEl: HTMLElement | null = null;
 let isOpen = false;
 let isFirstTimeSetup = false;
-let setupStep = 0; // 0=anthropic, 1=fish, 2=name, 3=done
+let setupStep = 0; // 0=fish, 1=name, 2=done
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -83,15 +76,6 @@ function buildPanelHTML(): string {
           <h3>API Keys</h3>
 
           <div class="settings-field">
-            <label>Anthropic API Key</label>
-            <div class="settings-input-row">
-              <input type="password" id="input-anthropic-key" placeholder="sk-ant-..." />
-              <button class="settings-btn" id="btn-test-anthropic">Test</button>
-              <span class="status-dot" id="status-anthropic"></span>
-            </div>
-          </div>
-
-          <div class="settings-field">
             <label>Fish Audio API Key</label>
             <div class="settings-input-row">
               <input type="password" id="input-fish-key" placeholder="Fish Audio key..." />
@@ -111,6 +95,9 @@ function buildPanelHTML(): string {
           <div class="settings-actions">
             <button class="settings-btn primary" id="btn-save-keys">Save Keys</button>
           </div>
+          <p class="settings-restart-notice" id="keys-restart-notice" style="display:none">
+            Saved. Restart the server (menu &rarr; Restart Server) for this to take effect.
+          </p>
         </section>
 
         <!-- Connection Status -->
@@ -118,9 +105,6 @@ function buildPanelHTML(): string {
           <h3>Connection Status</h3>
           <div class="status-grid">
             <div class="status-row"><span class="status-dot" id="status-claude-cli"></span><span>Claude Code CLI</span></div>
-            <div class="status-row"><span class="status-dot" id="status-calendar"></span><span>Apple Calendar</span></div>
-            <div class="status-row"><span class="status-dot" id="status-mail"></span><span>Apple Mail</span></div>
-            <div class="status-row"><span class="status-dot" id="status-notes"></span><span>Apple Notes</span></div>
             <div class="status-row"><span class="status-dot" id="status-server"></span><span>Server</span><span class="status-detail" id="status-server-detail"></span></div>
           </div>
         </section>
@@ -143,11 +127,6 @@ function buildPanelHTML(): string {
             </select>
           </div>
 
-          <div class="settings-field">
-            <label>Calendar Accounts</label>
-            <textarea id="input-calendar-accounts" rows="2" placeholder="auto (or comma-separated emails)"></textarea>
-          </div>
-
           <div class="settings-actions">
             <button class="settings-btn primary" id="btn-save-prefs">Save Preferences</button>
           </div>
@@ -157,8 +136,6 @@ function buildPanelHTML(): string {
         <section class="settings-section" id="section-sysinfo">
           <h3>System Info</h3>
           <div class="sysinfo-grid">
-            <div class="sysinfo-row"><span class="sysinfo-label">Memory entries</span><span id="sysinfo-memory">--</span></div>
-            <div class="sysinfo-row"><span class="sysinfo-label">Tasks</span><span id="sysinfo-tasks">--</span></div>
             <div class="sysinfo-row"><span class="sysinfo-label">Server port</span><span id="sysinfo-port">--</span></div>
             <div class="sysinfo-row"><span class="sysinfo-label">Uptime</span><span id="sysinfo-uptime">--</span></div>
           </div>
@@ -206,23 +183,15 @@ async function loadStatus() {
     const status = await apiGet<StatusResponse>("/api/settings/status");
 
     setDotStatus("status-claude-cli", status.claude_code_installed ? "green" : "red");
-    setDotStatus("status-calendar", status.calendar_accessible ? "green" : "red");
-    setDotStatus("status-mail", status.mail_accessible ? "green" : "red");
-    setDotStatus("status-notes", status.notes_accessible ? "green" : "red");
     setDotStatus("status-server", "green");
 
     const serverDetail = document.getElementById("status-server-detail");
     if (serverDetail) serverDetail.textContent = `port ${status.server_port} | up ${formatUptime(status.uptime_seconds)}`;
 
     // API key status dots
-    setDotStatus("status-anthropic", status.env_keys_set.anthropic ? "green" : "red");
     setDotStatus("status-fish", status.env_keys_set.fish_audio ? "green" : "red");
 
     // System info
-    const memEl = document.getElementById("sysinfo-memory");
-    if (memEl) memEl.textContent = String(status.memory_count);
-    const taskEl = document.getElementById("sysinfo-tasks");
-    if (taskEl) taskEl.textContent = String(status.task_count);
     const portEl = document.getElementById("sysinfo-port");
     if (portEl) portEl.textContent = String(status.server_port);
     const upEl = document.getElementById("sysinfo-uptime");
@@ -231,7 +200,19 @@ async function loadStatus() {
     return status;
   } catch (e) {
     console.error("[settings] failed to load status:", e);
+    // EVERY dot, not just the server's. The CLI and Fish dots are drawn from
+    // fields of the answer that never arrived, so leaving them green states
+    // as fact something this call failed to find out. "off" is the absence
+    // of a reading, which is what we have.
     setDotStatus("status-server", "red");
+    setDotStatus("status-claude-cli", "off");
+    setDotStatus("status-fish", "off");
+    const serverDetail = document.getElementById("status-server-detail");
+    if (serverDetail) serverDetail.textContent = "no answer from the server";
+    for (const id of ["sysinfo-port", "sysinfo-uptime"]) {
+      const node = document.getElementById(id);
+      if (node) node.textContent = "—";
+    }
     return null;
   }
 }
@@ -241,10 +222,8 @@ async function loadPreferences() {
     const prefs = await apiGet<PreferencesResponse>("/api/settings/preferences");
     const nameEl = document.getElementById("input-user-name") as HTMLInputElement;
     const honEl = document.getElementById("input-honorific") as HTMLSelectElement;
-    const calEl = document.getElementById("input-calendar-accounts") as HTMLTextAreaElement;
     if (nameEl) nameEl.value = prefs.user_name || "";
     if (honEl) honEl.value = prefs.honorific || "sir";
-    if (calEl) calEl.value = prefs.calendar_accounts || "auto";
   } catch (e) {
     console.error("[settings] failed to load preferences:", e);
   }
@@ -257,16 +236,17 @@ function wireEvents() {
 
   // Save keys
   document.getElementById("btn-save-keys")?.addEventListener("click", async () => {
-    const anthropicKey = (document.getElementById("input-anthropic-key") as HTMLInputElement).value.trim();
     const fishKey = (document.getElementById("input-fish-key") as HTMLInputElement).value.trim();
 
-    if (anthropicKey) {
-      await apiPost("/api/settings/keys", { key_name: "ANTHROPIC_API_KEY", key_value: anthropicKey });
-    }
+    let savedAny = false;
     if (fishKey) {
       await apiPost("/api/settings/keys", { key_name: "FISH_API_KEY", key_value: fishKey });
+      savedAny = true;
     }
     await loadStatus();
+
+    const notice = document.getElementById("keys-restart-notice");
+    if (notice) notice.style.display = savedAny ? "block" : "none";
   });
 
   // Save voice ID
@@ -274,18 +254,6 @@ function wireEvents() {
     const voiceId = (document.getElementById("input-fish-voice-id") as HTMLInputElement).value.trim();
     if (voiceId) {
       await apiPost("/api/settings/keys", { key_name: "FISH_VOICE_ID", key_value: voiceId });
-    }
-  });
-
-  // Test Anthropic
-  document.getElementById("btn-test-anthropic")?.addEventListener("click", async () => {
-    setDotStatus("status-anthropic", "yellow");
-    const key = (document.getElementById("input-anthropic-key") as HTMLInputElement).value.trim();
-    try {
-      const result = await apiPost<{ valid: boolean; error?: string }>("/api/settings/test-anthropic", { key_value: key || undefined });
-      setDotStatus("status-anthropic", result.valid ? "green" : "red");
-    } catch {
-      setDotStatus("status-anthropic", "red");
     }
   });
 
@@ -305,8 +273,7 @@ function wireEvents() {
   document.getElementById("btn-save-prefs")?.addEventListener("click", async () => {
     const user_name = (document.getElementById("input-user-name") as HTMLInputElement).value.trim();
     const honorific = (document.getElementById("input-honorific") as HTMLSelectElement).value;
-    const calendar_accounts = (document.getElementById("input-calendar-accounts") as HTMLTextAreaElement).value.trim();
-    await apiPost("/api/settings/preferences", { user_name, honorific, calendar_accounts });
+    await apiPost("/api/settings/preferences", { user_name, honorific });
     await loadStatus();
   });
 
@@ -333,29 +300,26 @@ function enterSetupMode() {
 }
 
 function showSetupStep(step: number) {
-  const sections = ["section-api-keys", "section-status", "section-preferences", "section-sysinfo"];
+  const sections = ["section-api-keys", "section-preferences"];
   sections.forEach((id, i) => {
     const el = document.getElementById(id);
     if (!el) return;
     if (step === 0 && i === 0) el.style.display = "";
-    else if (step === 1 && i === 0) el.style.display = "";
-    else if (step === 2 && i === 2) el.style.display = "";
-    else if (step === 3) el.style.display = "";
+    else if (step === 1 && i === 1) el.style.display = "";
     else el.style.display = "none";
   });
 
   const nextBtn = document.getElementById("btn-setup-next");
   if (nextBtn) {
-    if (step === 0) nextBtn.textContent = "Next: Test Keys";
-    else if (step === 1) nextBtn.textContent = "Next: Set Your Name";
-    else if (step === 2) nextBtn.textContent = "Finish Setup";
+    if (step === 0) nextBtn.textContent = "Next: Set Your Name";
+    else if (step === 1) nextBtn.textContent = "Finish Setup";
     else nextBtn.style.display = "none";
   }
 }
 
 async function advanceSetup() {
   setupStep++;
-  if (setupStep >= 3) {
+  if (setupStep >= 2) {
     // Done — save everything and close
     isFirstTimeSetup = false;
     const welcome = document.getElementById("settings-welcome");
@@ -400,7 +364,7 @@ export async function openSettings() {
   await loadPreferences();
 
   // Check for first-time setup
-  if (status && !status.env_keys_set.anthropic) {
+  if (status && !status.env_keys_set.fish_audio) {
     enterSetupMode();
   }
 }
@@ -424,7 +388,7 @@ export function isSettingsOpen(): boolean {
 export async function checkFirstTimeSetup(): Promise<boolean> {
   try {
     const status = await apiGet<StatusResponse>("/api/settings/status");
-    if (!status.env_keys_set.anthropic) {
+    if (!status.env_keys_set.fish_audio) {
       openSettings();
       return true;
     }

@@ -15,7 +15,7 @@ import "./style.css";
 // State machine
 // ---------------------------------------------------------------------------
 
-type State = "idle" | "listening" | "thinking" | "speaking";
+type State = "idle" | "listening" | "thinking" | "speaking" | "compacting";
 let currentState: State = "idle";
 let isMuted = false;
 
@@ -36,6 +36,7 @@ function updateStatus(state: State) {
     listening: "listening...",
     thinking: "thinking...",
     speaking: "",
+    compacting: "",          // the notice banner carries the words; the orb carries the state
   };
   statusEl.textContent = labels[state];
 }
@@ -54,25 +55,19 @@ const socket = createSocket(WS_URL);
 const audioPlayer = createAudioPlayer();
 orb.setAnalyser(audioPlayer.getAnalyser());
 
+let muteMicDuringSpeech = false;
+
 function transition(newState: State) {
   if (newState === currentState) return;
   currentState = newState;
   orb.setState(newState as OrbState);
   updateStatus(newState);
 
-  switch (newState) {
-    case "idle":
-      if (!isMuted) voiceInput.resume();
-      break;
-    case "listening":
-      if (!isMuted) voiceInput.resume();
-      break;
-    case "thinking":
-      voiceInput.pause();
-      break;
-    case "speaking":
-      voiceInput.pause();
-      break;
+  if (isMuted) return;
+  if (newState === "speaking" && muteMicDuringSpeech) {
+    voiceInput.pause();
+  } else {
+    voiceInput.resume();
   }
 }
 
@@ -82,23 +77,27 @@ function transition(newState: State) {
 
 const voiceInput = createVoiceInput(
   (text: string) => {
-    // Cancel any current JARVIS response before sending new input
-    audioPlayer.stop();
-    // User spoke — send transcript
+    // The server decides whether this is echo, a barge-in, or a new turn.
     socket.send({ type: "transcript", text, isFinal: true });
-    transition("thinking");
+  },
+  (text: string) => {
+    socket.send({ type: "interim", text });
   },
   (msg: string) => {
     showError(msg);
   }
 );
 
-// ---------------------------------------------------------------------------
-// Audio playback finished
-// ---------------------------------------------------------------------------
+audioPlayer.onPlayed((utt, idx) => {
+  socket.send({ type: "played", utt, idx });
+});
 
-audioPlayer.onFinished(() => {
-  transition("idle");
+// End of speech is the server's call (`status: idle` after every chunk is
+// acked); a transient empty queue mid-utterance must not flip the UI.
+audioPlayer.onFinished(() => {});
+
+audioPlayer.onNeedsGesture(() => {
+  showError("Click anywhere to enable audio");
 });
 
 // ---------------------------------------------------------------------------
@@ -108,39 +107,37 @@ audioPlayer.onFinished(() => {
 socket.onMessage((msg) => {
   const type = msg.type as string;
 
-  if (type === "audio") {
-    const audioData = msg.data as string;
-    console.log("[audio] received", audioData ? `${audioData.length} chars` : "EMPTY", "state:", currentState);
-    if (audioData) {
-      if (currentState !== "speaking") {
-        transition("speaking");
-      }
-      audioPlayer.enqueue(audioData);
-    } else {
-      // TTS failed — no audio but still need to return to idle
-      console.warn("[audio] no data received, returning to idle");
-      transition("idle");
+  if (type === "config") {
+    muteMicDuringSpeech = Boolean(msg.muteMicDuringSpeech);
+  } else if (type === "audio") {
+    const data = msg.data as string;
+    if (data) {
+      if (currentState !== "speaking") transition("speaking");
+      audioPlayer.enqueue(data, Number(msg.utt), Number(msg.idx));
     }
-    // Log text for debugging
     if (msg.text) console.log("[JARVIS]", msg.text);
+  } else if (type === "stop") {
+    audioPlayer.stop();
+    transition(isMuted ? "idle" : "listening");
+  } else if (type === "drop_queued") {
+    audioPlayer.dropQueued();
   } else if (type === "status") {
     const state = msg.state as string;
-    if (state === "thinking" && currentState !== "thinking") {
-      transition("thinking");
-    } else if (state === "working") {
-      // Task spawned — show thinking with a different label
-      transition("thinking");
-      statusEl.textContent = "working...";
-    } else if (state === "idle") {
-      transition("idle");
-    }
+    if (state === "thinking") transition("thinking");
+    else if (state === "speaking") transition("speaking");
+    else if (state === "compacting") transition("compacting");
+    else if (state === "idle") transition(isMuted ? "idle" : "listening");
   } else if (type === "text") {
-    // Text fallback when TTS fails
+    // A chunk TTS could not voice: show it instead of losing it
     console.log("[JARVIS]", msg.text);
-  } else if (type === "task_spawned") {
-    console.log("[task]", "spawned:", msg.task_id, msg.prompt);
-  } else if (type === "task_complete") {
-    console.log("[task]", "complete:", msg.task_id, msg.status, msg.summary);
+    statusEl.textContent = String(msg.text);
+  } else if (type === "notice") {
+    // Shown, never spoken. The server sends one when it is about to be busy
+    // for a few seconds (a context rotation), and an empty string to clear it.
+    // Without it the pause looks like a crash.
+    const text = String(msg.text ?? "");
+    statusEl.textContent = text;
+    if (text) console.log("[notice]", text);
   }
 });
 
@@ -151,7 +148,7 @@ socket.onMessage((msg) => {
 // Start listening after a brief delay for the orb to render
 setTimeout(() => {
   voiceInput.start();
-  transition("listening");
+  if (currentState !== "speaking") transition("listening");
 }, 1000);
 
 // Resume AudioContext on ANY user interaction (browser autoplay policy)
@@ -217,8 +214,8 @@ btnFixSelf.addEventListener("click", (e) => {
   e.stopPropagation();
   menuDropdown.style.display = "none";
   // Activate work mode on the WebSocket session (JARVIS becomes Claude Code's voice)
-  socket.send({ type: "fix_self" });
-  statusEl.textContent = "entering work mode...";
+  // Milestone 1 has no tools yet; "Fix yourself" returns as a brain tool later.
+  statusEl.textContent = "fix-yourself is not available in this build";
 });
 
 // Settings button

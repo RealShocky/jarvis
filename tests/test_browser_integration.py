@@ -2,7 +2,17 @@
 Browser integration tests for JARVIS.
 
 Exercises the browser pipeline: search, visit, screenshot.
-Skips if no network or Playwright browsers not installed.
+
+NOT RUN BY DEFAULT. Every test here is marked `browser` and deselected in
+pytest.ini, because they visit real URLs and `JarvisBrowser` launches
+`headless=False` on purpose — so running them opens browser windows on your
+desk and needs the network. Run them deliberately:
+
+    pytest -m browser
+
+They also skip themselves if there is no network or Playwright has no
+browsers installed, so an explicit run on a disconnected machine reports
+skips rather than failures.
 """
 
 import asyncio
@@ -32,6 +42,11 @@ def _has_network() -> bool:
 
 NETWORK_AVAILABLE = _has_network()
 SKIP_REASON = "No network or Playwright browsers not available"
+
+# Marks every test in this file, so pytest.ini's `-m "not browser"` deselects
+# the lot. One line here beats a decorator per test that somebody will forget
+# to add to the tenth one.
+pytestmark = pytest.mark.browser
 
 
 @pytest_asyncio.fixture
