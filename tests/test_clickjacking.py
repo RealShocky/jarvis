@@ -156,7 +156,12 @@ def test_no_referrer_leaves_the_machine(env, path):
 
 
 def test_the_dashboard_is_still_served(env):
-    c, _ = env
+    c, server = env
+    if not (server.FRONTEND_DIST / "dashboard.html").exists():
+        # A fresh clone that runs `pytest` before `npm run build` — the
+        # README's order — has no page to serve yet. Its sibling below
+        # skips the same way; this one failed with a 404 instead.
+        pytest.skip("frontend has not been built")
     r = c.get("/dashboard")
     assert r.status_code == 200
     assert "text/html" in r.headers.get("content-type", "")

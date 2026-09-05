@@ -724,6 +724,23 @@ def server(monkeypatch, tmp_path):
     (project / "main.py").write_text("needle = 1\n")
     monkeypatch.setattr(server_module, "cached_projects",
                         [{"name": "chitauri", "path": str(project)}])
+
+    class _FakeExecutor:
+        """Records a spawn as a run row and returns its id. NEVER starts a
+        process: the module-level `run_executor_instance` is a real one
+        with the real `claude`, and `tool_spawn_run` driven against it
+        started a driver that the loop then cancelled mid-spawn — the exact
+        thing Python 3.12 cannot cancel (tests/conftest.py)."""
+
+        async def spawn(self, prompt, name, path, origin, resume_from=None, model=None):
+            run_id = run_store.create_run(prompt, name, path, origin, resume_from)
+            run_store.update_run(run_id, requested_model=model or "sonnet")
+            return run_id
+
+        async def cancel(self, run_id):
+            return False
+
+    monkeypatch.setattr(server_module, "run_executor_instance", _FakeExecutor())
     return server_module
 
 

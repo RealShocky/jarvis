@@ -87,7 +87,7 @@ codebase that started without them. Here it is load-bearing from the floor up:
 
 ## And it is tested
 
-Public: 6 test files, 43 tests. Here: 65 files, **1,651 tests**, named for the
+Public: 6 test files, 43 tests. Here: 83 files, **2,405 tests**, named for the
 behaviour they protect rather than the function they call.
 
 ---

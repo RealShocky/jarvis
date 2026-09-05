@@ -1,4 +1,7 @@
+import asyncio
+
 import pytest
+import pytest_asyncio
 
 
 @pytest.fixture(autouse=True)
@@ -64,3 +67,51 @@ def _never_write_to_the_live_data_dir(monkeypatch, tmp_path):
     overwrote the live usage reading with a fixture's fake one.
     """
     monkeypatch.setenv("JARVIS_DATA_DIR", str(tmp_path / "data-dir"))
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _no_run_left_mid_flight():
+    """No test may end with a run's driver still starting its child.
+
+    The CI hang, twice, on the macOS runner's Python 3.12 and never on 3.13:
+    a test spawned a run, asserted on the row, and returned in the same
+    millisecond — while `RunExecutor._drive` was still inside
+    `asyncio.create_subprocess_exec`, before the child existed. The loop's
+    teardown then cancelled that task mid-spawn, and 3.12's subprocess
+    transport never completes a cancellation delivered there: the suite sat
+    in `_cancel_all_tasks` until GitHub killed the job 25 minutes later.
+    3.13 completes it, which is why no local run ever showed it.
+
+    So every driver alive at the end of a test is waited for here, inside
+    the test's own loop, before the runner closes it. A test's fake `claude`
+    exits in milliseconds, so the wait is normally nothing; a driver that
+    is queued or reading forever is cancelled only after it has had time to
+    get past the spawn, which is the one place cancellation must not land.
+    """
+    yield
+    me = asyncio.current_task()
+
+    def _alive(qualname: str) -> list:
+        return [t for t in asyncio.all_tasks()
+                if t is not me and not t.done()
+                and getattr(t.get_coro(), "__qualname__", "") == qualname]
+
+    # First, the exact place: asyncio's own pipe-connection task, which
+    # exists only between fork and "the child is up". Whoever spawned it
+    # (a run driver, the brain, a fake `osascript`) is parked on it. Let it
+    # finish — milliseconds — and yield once so the spawner moves on.
+    connecting = _alive("BaseSubprocessTransport._connect_pipes")
+    if connecting:
+        await asyncio.wait(connecting, timeout=5)
+        await asyncio.sleep(0)
+    # Then a run driver still going: give it time to end on its own (a
+    # test's fake claude exits at once) before it is cancelled somewhere
+    # safe to cancel.
+    drivers = _alive("RunExecutor._drive")
+    if not drivers:
+        return
+    _done, pending = await asyncio.wait(drivers, timeout=10)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.wait(pending, timeout=5)
