@@ -170,7 +170,7 @@ def test_a_name_is_bounded_more_tightly_than_a_key(server):
     for key in ("USER_NAME", "HONORIFIC"):
         assert key in server.ENV_NAME_KEYS, key
         assert server._env_value_problem(key, "x" * 200), key
-        assert server._env_value_problem(key, "Ethan") is None, key
+        assert server._env_value_problem(key, "Tony") is None, key
         assert server._env_value_problem(key, "Étienne d'Arcy-Smith") is None
 
 
@@ -184,13 +184,13 @@ def test_a_control_character_is_refused(server):
 
 
 def test_the_ordinary_settings_still_save(server):
-    for key, value in (("USER_NAME", "Ethan"), ("HONORIFIC", "sir"),
+    for key, value in (("USER_NAME", "Tony"), ("HONORIFIC", "sir"),
                        ("FISH_VOICE_ID", "b545c585f4d491a"),
                        ("FISH_API_KEY", "x" * 64)):
         assert server._env_value_problem(key, value) is None, key
         server._write_env_key(key, value)
     _, parsed = server._read_env()
-    assert parsed["USER_NAME"] == "Ethan"
+    assert parsed["USER_NAME"] == "Tony"
     assert parsed["FISH_API_KEY"] == "x" * 64
 
 

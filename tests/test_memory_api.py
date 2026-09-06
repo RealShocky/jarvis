@@ -71,19 +71,19 @@ def test_a_read_never_creates_the_folder(api):
 
 def test_the_snapshot_lists_memories_projects_and_the_journal(api):
     client, jm, _dp, _rs = api
-    jm.write_memory("Ethan prefers Postgres over SQLite", "for chitauri")
-    jm.add_to_index("Ethan prefers Postgres over SQLite", "database preference")
+    jm.write_memory("Tony prefers Postgres over SQLite", "for chitauri")
+    jm.add_to_index("Tony prefers Postgres over SQLite", "database preference")
     jm.write_project_note("chitauri", "The billing job runs nightly.")
     jm.write_journal("We shipped the dashboard.", reason="shutdown")
 
     body = client.get("/api/memory").json()
 
-    assert body["index"] == [{"title": "Ethan prefers Postgres over SQLite",
-                              "slug": "ethan-prefers-postgres-over-sqlite",
+    assert body["index"] == [{"title": "Tony prefers Postgres over SQLite",
+                              "slug": "tony-prefers-postgres-over-sqlite",
                               "hook": "database preference"}]
     assert [m["slug"] for m in body["memories"]] == \
-        ["ethan-prefers-postgres-over-sqlite"]
-    assert body["memories"][0]["title"] == "Ethan prefers Postgres over SQLite"
+        ["tony-prefers-postgres-over-sqlite"]
+    assert body["memories"][0]["title"] == "Tony prefers Postgres over SQLite"
     assert isinstance(body["memories"][0]["modified"], (int, float))
     assert [p["slug"] for p in body["projects"]] == ["chitauri"]
     assert len(body["journal"]) == 1

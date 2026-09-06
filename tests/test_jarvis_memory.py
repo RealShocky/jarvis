@@ -22,13 +22,13 @@ def test_the_layout_is_created_once_and_is_idempotent(home):
 
 
 def test_a_memory_is_one_file_with_a_readable_name(home):
-    path = jm.write_memory("Ethan prefers Postgres over SQLite",
+    path = jm.write_memory("Tony prefers Postgres over SQLite",
                            "He said so while we were fixing chitauri.")
 
     assert path.parent == home / "memory"
-    assert path.name == "ethan-prefers-postgres-over-sqlite.md"
+    assert path.name == "tony-prefers-postgres-over-sqlite.md"
     text = path.read_text()
-    assert "Ethan prefers Postgres over SQLite" in text
+    assert "Tony prefers Postgres over SQLite" in text
     assert "chitauri" in text
 
 
@@ -41,7 +41,7 @@ def test_writing_the_same_title_twice_updates_rather_than_duplicating(home):
 
 
 def test_slugify_makes_a_filename_out_of_anything_sayable(home):
-    assert jm.slugify("Ethan's 'chitauri' work — Q3/2026!") == "ethans-chitauri-work-q3-2026"
+    assert jm.slugify("Tony's 'chitauri' work — Q3/2026!") == "tonys-chitauri-work-q3-2026"
     assert jm.slugify("   ") == "note"
     assert len(jm.slugify("x" * 200)) <= 60
 
@@ -51,13 +51,13 @@ def test_reading_a_memory_that_does_not_exist_returns_none(home):
 
 
 def test_the_index_gains_one_line_per_memory(home):
-    jm.add_to_index("Ethan prefers Postgres", "said during chitauri work")
+    jm.add_to_index("Tony prefers Postgres", "said during chitauri work")
     jm.add_to_index("Hammer is the worker project", "not to be confused with hammer-private")
 
     lines = jm.index_lines()
     assert len(lines) == 2
     assert all(line.startswith("- [") for line in lines)
-    assert "ethan-prefers-postgres.md" in lines[0]
+    assert "tony-prefers-postgres.md" in lines[0]
 
 
 def test_the_index_does_not_duplicate_a_title(home):
@@ -95,7 +95,7 @@ def test_reading_an_unknown_project_note_returns_none(home):
 
 
 def test_a_journal_entry_is_timestamped_and_labelled(home):
-    p = jm.write_journal("Worked on chitauri. Ethan wants Postgres.", reason="rotation")
+    p = jm.write_journal("Worked on chitauri. Tony wants Postgres.", reason="rotation")
 
     assert p.parent == home / "journal"
     assert p.name.endswith("-rotation.md")
@@ -121,14 +121,14 @@ def test_add_to_index_preserves_hand_written_prose(home):
     path = home / "MEMORY.md"
     path.write_text(
         "# What JARVIS remembers\n\n"
-        "Ethan asked me to always check the chitauri staging env before prod.\n\n"
+        "Tony asked me to always check the chitauri staging env before prod.\n\n"
         "- [Old fact](old-fact.md) — some hook\n"
     )
 
     jm.add_to_index("New fact", "a hook")
 
     text = path.read_text()
-    assert "Ethan asked me to always check the chitauri staging env before prod." in text
+    assert "Tony asked me to always check the chitauri staging env before prod." in text
     assert "- [Old fact](old-fact.md) — some hook" in text
     assert "- [New fact](new-fact.md) — a hook" in text
 
@@ -163,12 +163,12 @@ def test_latest_journal_is_correct_even_when_reasons_sort_out_of_order(home):
 
 
 def test_search_finds_a_memory_by_its_words(home):
-    jm.write_memory("Ethan prefers Postgres", "He said so during chitauri work.")
+    jm.write_memory("Tony prefers Postgres", "He said so during chitauri work.")
     jm.write_memory("Hammer is the worker project", "Runs on the Desktop.")
 
     hits = jm.search("postgres")
 
-    assert hits and hits[0]["name"] == "ethan-prefers-postgres"
+    assert hits and hits[0]["name"] == "tony-prefers-postgres"
     assert hits[0]["kind"] == "memory"
     assert "Postgres" in hits[0]["excerpt"]
 
@@ -282,8 +282,8 @@ def test_two_genuinely_different_titles_that_slugify_identically_both_survive(ho
 
 
 def test_the_same_title_written_twice_still_produces_one_file(home):
-    p1 = jm.write_memory("Ethan's DB choice", "uses postgres")
-    p2 = jm.write_memory("Ethan's DB choice", "uses sqlite")
+    p1 = jm.write_memory("Tony's DB choice", "uses postgres")
+    p2 = jm.write_memory("Tony's DB choice", "uses sqlite")
 
     assert p1 == p2
     assert len(jm.list_memories()) == 1
@@ -293,8 +293,8 @@ def test_the_same_title_written_twice_still_produces_one_file(home):
 
 
 def test_a_title_differing_only_by_apostrophe_or_case_is_the_same_memory(home):
-    p1 = jm.write_memory("Ethan's DB choice", "uses postgres")
-    p2 = jm.write_memory("ethans db choice", "uses sqlite")
+    p1 = jm.write_memory("Tony's DB choice", "uses postgres")
+    p2 = jm.write_memory("tonys db choice", "uses sqlite")
 
     assert p1 == p2
     assert len(jm.list_memories()) == 1

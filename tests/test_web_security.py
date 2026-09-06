@@ -393,7 +393,7 @@ def test_an_env_value_with_a_newline_is_refused(env):
     c, server, _ = env
     r = c.post("/api/settings/keys",
                json={"key_name": "USER_NAME",
-                     "key_value": "Ethan\nJARVIS_CLAUDE_PATH=/tmp/evil"},
+                     "key_value": "Tony\nJARVIS_CLAUDE_PATH=/tmp/evil"},
                headers={"Origin": DASHBOARD_ORIGIN})
     assert r.status_code == 400, r.text
     dotenv = server._env_file_path()
@@ -408,10 +408,10 @@ def test_write_env_key_refuses_anything_that_can_start_a_new_line(env, bad):
 
 
 def test_a_name_with_a_space_in_it_is_still_a_name(env):
-    """The gate is line breaks, not punctuation — Ethan Rogers must save."""
+    """The gate is line breaks, not punctuation — Tony Stark must save."""
     c, server, _ = env
-    server._write_env_key("USER_NAME", "Ethan Rogers")
-    assert "USER_NAME=Ethan Rogers" in server._env_file_path().read_text()
+    server._write_env_key("USER_NAME", "Tony Stark")
+    assert "USER_NAME=Tony Stark" in server._env_file_path().read_text()
 
 
 def test_write_env_key_refuses_a_key_nobody_is_allowed_to_set(env):
@@ -425,7 +425,7 @@ def test_write_env_key_refuses_a_key_nobody_is_allowed_to_set(env):
 def test_preferences_values_go_through_the_same_gate(env):
     c, _, _ = env
     r = c.post("/api/settings/preferences",
-               json={"user_name": "Ethan\nJARVIS_PROJECT_ROOTS=/",
+               json={"user_name": "Tony\nJARVIS_PROJECT_ROOTS=/",
                      "honorific": "sir"},
                headers={"Origin": DASHBOARD_ORIGIN})
     assert r.status_code == 400, r.text
@@ -503,7 +503,7 @@ def test_settings_status_is_a_read_and_creates_nothing(env, monkeypatch,
     assert not fake_env.exists(), "a GET created .env"
 
     # A write still seeds it — that path is allowed to.
-    server._write_env_key("USER_NAME", "Ethan")
+    server._write_env_key("USER_NAME", "Tony")
     assert fake_env.exists()
 
 

@@ -5,7 +5,7 @@ of the file splits it with `str.splitlines()`, which splits on ten. The gap
 was a one-request exploit, confirmed against a live server:
 
     POST /api/settings/preferences
-    {"user_name": "Ethan\\x0bJARVIS_CLAUDE_PATH=/tmp/evil", "honorific": "sir"}
+    {"user_name": "Tony\\x0bJARVIS_CLAUDE_PATH=/tmp/evil", "honorific": "sir"}
     -> 200
     _read_env() -> {..., 'JARVIS_CLAUDE_PATH': '/tmp/evil'}
 
@@ -80,7 +80,7 @@ def test_the_reader_really_does_split_on_it(env, sep):
     _c, server = env
     path = server._env_file_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"USER_NAME=Ethan{sep}{PAYLOAD}\n")
+    path.write_text(f"USER_NAME=Tony{sep}{PAYLOAD}\n")
     _lines, parsed = server._read_env()
     assert parsed.get("JARVIS_CLAUDE_PATH") == "/tmp/evil", (hex(ord(sep)),
                                                              parsed)
@@ -90,7 +90,7 @@ def test_the_reader_really_does_split_on_it(env, sep):
 def test_the_writer_refuses_every_separator_the_reader_splits_on(env, sep):
     _c, server = env
     with pytest.raises(ValueError):
-        server._write_env_key("USER_NAME", f"Ethan{sep}{PAYLOAD}")
+        server._write_env_key("USER_NAME", f"Tony{sep}{PAYLOAD}")
 
 
 @pytest.mark.parametrize("sep", SEPARATORS, ids=_ids)
@@ -98,7 +98,7 @@ def test_no_separator_smuggles_a_setting_through_the_keys_endpoint(env, sep):
     c, server = env
     r = c.post("/api/settings/keys",
                json={"key_name": "USER_NAME",
-                     "key_value": f"Ethan{sep}{PAYLOAD}"},
+                     "key_value": f"Tony{sep}{PAYLOAD}"},
                headers={"Origin": DASHBOARD_ORIGIN})
     assert r.status_code == 400, (hex(ord(sep)), r.text)
     _lines, parsed = server._read_env()
@@ -110,7 +110,7 @@ def test_no_separator_smuggles_a_setting_through_the_preferences_endpoint(
         env, sep):
     c, server = env
     r = c.post("/api/settings/preferences",
-               json={"user_name": f"Ethan{sep}{PAYLOAD}", "honorific": "sir"},
+               json={"user_name": f"Tony{sep}{PAYLOAD}", "honorific": "sir"},
                headers={"Origin": DASHBOARD_ORIGIN})
     assert r.status_code == 400, (hex(ord(sep)), r.text)
     _lines, parsed = server._read_env()
@@ -123,7 +123,7 @@ def test_the_honorific_goes_through_the_same_gate(env, sep):
     hand-written list, so it had the same hole."""
     c, server = env
     r = c.post("/api/settings/preferences",
-               json={"user_name": "Ethan", "honorific": f"sir{sep}{PAYLOAD}"},
+               json={"user_name": "Tony", "honorific": f"sir{sep}{PAYLOAD}"},
                headers={"Origin": DASHBOARD_ORIGIN})
     assert r.status_code == 400, (hex(ord(sep)), r.text)
     assert "JARVIS_CLAUDE_PATH" not in server._read_env()[1]
@@ -132,7 +132,7 @@ def test_the_honorific_goes_through_the_same_gate(env, sep):
 def test_the_crlf_pair_is_refused(env):
     _c, server = env
     with pytest.raises(ValueError):
-        server._write_env_key("USER_NAME", f"Ethan\r\n{PAYLOAD}")
+        server._write_env_key("USER_NAME", f"Tony\r\n{PAYLOAD}")
 
 
 def test_a_null_byte_is_still_refused(env):
@@ -141,7 +141,7 @@ def test_a_null_byte_is_still_refused(env):
     path to a C API, so it keeps its own rule and its own reason."""
     _c, server = env
     with pytest.raises(ValueError):
-        server._write_env_key("USER_NAME", "Ethan\0evil")
+        server._write_env_key("USER_NAME", "Tony\0evil")
 
 
 def test_the_writer_refuses_everything_the_reader_splits_on(env):
@@ -200,7 +200,7 @@ def test_every_ordinary_printable_character_still_saves(env):
 def test_ordinary_values_still_save(env):
     """A gate that refuses everything is not a gate, it is an outage."""
     _c, server = env
-    for value in ("Ethan Rogers", "sir", "O'Brien", "Ethan-Rogers_1",
+    for value in ("Tony Stark", "sir", "O'Brien", "Tony-Stark_1",
                   "Éthan Røgers", "🫡", "sk-live-abc123.def_456",
                   "a=b=c", "#notacomment", ""):
         server._write_env_key("USER_NAME", value)
@@ -209,11 +209,11 @@ def test_ordinary_values_still_save(env):
 
 def test_a_value_the_reader_would_change_is_refused(env):
     """Deliberate, and the reason is honesty rather than injection: the
-    reader strips whitespace and one layer of quotes, so ` Ethan ` would
-    come back as `Ethan` and `'Ethan'` as `Ethan`. Saying "saved" and
+    reader strips whitespace and one layer of quotes, so ` Tony ` would
+    come back as `Tony` and `'Tony'` as `Tony`. Saying "saved" and
     storing something else is the same class of lie as reporting a stalled
     run as a success."""
     _c, server = env
-    for value in (" Ethan ", "'Ethan'", '"Ethan"', "Ethan\t"):
+    for value in (" Tony ", "'Tony'", '"Tony"', "Tony\t"):
         with pytest.raises(ValueError):
             server._write_env_key("USER_NAME", value)

@@ -210,14 +210,14 @@ def test_the_index_stays_parseable_after_a_hostile_title(memory):
 
 
 def test_an_ordinary_memory_still_reads_as_itself(memory):
-    memory.write_memory("Ethan prefers postgres", "He said so on Tuesday.")
-    memory.add_to_index("Ethan prefers postgres", "over sqlite, every time")
+    memory.write_memory("Tony prefers postgres", "He said so on Tuesday.")
+    memory.add_to_index("Tony prefers postgres", "over sqlite, every time")
     rows = memory.index_entries()
-    assert rows == [{"title": "Ethan prefers postgres",
-                     "slug": "ethan-prefers-postgres",
+    assert rows == [{"title": "Tony prefers postgres",
+                     "slug": "tony-prefers-postgres",
                      "hook": "over sqlite, every time"}], rows
     assert "He said so on Tuesday." in memory.read_memory(
-        "Ethan prefers postgres")
+        "Tony prefers postgres")
 
 
 def test_a_multi_line_body_is_still_allowed(memory):

@@ -272,7 +272,7 @@ def test_a_later_clean_turn_may_still_write(call):
     assert _call("remember", title="X", body="Y")["ok"] is False
 
     brain.new_turn()
-    out = _call("remember", title="Ethan prefers Postgres",
+    out = _call("remember", title="Tony prefers Postgres",
                 body="He said so out loud.")
     assert out["ok"] is True, out
     assert "Postgres" in jarvis_memory._index_path().read_text()

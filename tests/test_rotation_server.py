@@ -41,7 +41,7 @@ class _Brain:
     async def turn(self, text, origin="user", on_delta=None):
         self.asked.append((text, origin))
         import brain
-        return brain.TurnResult(origin, "We fixed chitauri and Ethan chose Postgres.",
+        return brain.TurnResult(origin, "We fixed chitauri and Tony chose Postgres.",
                                 "result")
 
     async def rotate(self, handover=None):

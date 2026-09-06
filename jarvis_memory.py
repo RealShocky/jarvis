@@ -98,7 +98,7 @@ def _normalize_title(text: str) -> str:
     genuinely different long titles that happen to share their first
     SLUG_MAX characters look identical. Trivial punctuation/case/apostrophe
     differences still collapse to the same normalised form, which is what
-    lets "Ethan's DB choice" and "ethans db choice" count as the same
+    lets "Tony's DB choice" and "tonys db choice" count as the same
     memory rather than two.
     """
     stripped = _APOSTROPHES.sub("", (text or "").lower())
@@ -108,7 +108,7 @@ def _normalize_title(text: str) -> str:
 def slugify(text: str) -> str:
     """A filename a person can recognise in a directory listing."""
     # Strip apostrophes/quotes rather than treating them as separators, so
-    # "Ethan's" becomes "ethans" and not "ethan-s".
+    # "Tony's" becomes "tonys" and not "tony-s".
     norm = _normalize_title(text)
     return (norm[:SLUG_MAX].rstrip("-") or "note")
 
