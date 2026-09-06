@@ -6,7 +6,7 @@
  */
 
 import { createOrb, type OrbState } from "./orb";
-import { createVoiceInput, createAudioPlayer } from "./voice";
+import { createVoiceInput, createAudioPlayer, createMicMonitor } from "./voice";
 import { createSocket } from "./ws";
 import { openSettings, checkFirstTimeSetup } from "./settings";
 import "./style.css";
@@ -60,6 +60,8 @@ let muteMicDuringSpeech = false;
 function transition(newState: State) {
   if (newState === currentState) return;
   currentState = newState;
+  const btn = document.getElementById("hush");
+  if (btn) (btn as HTMLButtonElement).hidden = newState !== "speaking";
   orb.setState(newState as OrbState);
   updateStatus(newState);
 
@@ -78,15 +80,72 @@ function transition(newState: State) {
 const voiceInput = createVoiceInput(
   (text: string) => {
     // The server decides whether this is echo, a barge-in, or a new turn.
+    micMonitor.sawSpeech();
     socket.send({ type: "transcript", text, isFinal: true });
   },
   (text: string) => {
+    micMonitor.sawSpeech();
     socket.send({ type: "interim", text });
   },
   (msg: string) => {
     showError(msg);
+  },
+  (event: string) => {
+    // Mirror the recogniser's lifecycle to the server log. Going deaf is a
+    // browser-side failure the server cannot otherwise see at all, and the
+    // console it used to be confined to is never open when it happens.
+    socket.send({ type: "mic", text: event });
   }
 );
+
+// A live meter for the microphone itself. If this moves when you speak, the
+// microphone is working — whatever else is or is not happening. It answers
+// "is it even hearing me?" without a log, a console or anyone to ask.
+const micDot = document.createElement("div");
+micDot.id = "mic-level";
+micDot.title = "microphone input";
+document.body.appendChild(micDot);
+
+const micMonitor = createMicMonitor(
+  (level: number) => {
+    const pct = Math.min(100, Math.round(level * 900));
+    micDot.style.setProperty("--level", `${pct}%`);
+    micDot.classList.toggle("is-hot", level > 0.02);
+  },
+  (event: string) => {
+    socket.send({ type: "mic", text: event });
+    // Proven deaf: sound going in, nothing coming out. Do not wait for the
+    // rotation timer to happen along — measured once at 21 seconds, all of
+    // it lost. Rebuild the recogniser now.
+    if (event.startsWith("DEAF")) voiceInput.restart("deaf: audio in, no results");
+  }
+);
+
+// ── stopping him ──────────────────────────────────────────────────────────
+// Escape, or the button that appears while he is talking. Not a spoken word:
+// his voice comes back through the microphone garbled, and a mis-hear that
+// looked like "stop" would cut him off at random. A keystroke cannot be
+// misheard.
+const hushBtn = document.createElement("button");
+hushBtn.id = "hush";
+hushBtn.type = "button";
+hushBtn.textContent = "Stop";
+hushBtn.title = "Stop speaking (Esc)";
+hushBtn.hidden = true;
+document.body.appendChild(hushBtn);
+
+function hush() {
+  if (currentState !== "speaking") return;
+  // Locally first: the round trip is real and silence should be instant.
+  audioPlayer.stop();
+  socket.send({ type: "hush" });
+  transition(isMuted ? "idle" : "listening");
+}
+
+hushBtn.addEventListener("click", hush);
+window.addEventListener("keydown", (e: KeyboardEvent) => {
+  if (e.key === "Escape") { e.preventDefault(); hush(); }
+});
 
 audioPlayer.onPlayed((utt, idx) => {
   socket.send({ type: "played", utt, idx });

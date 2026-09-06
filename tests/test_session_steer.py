@@ -577,9 +577,13 @@ class ScriptedBrain:
         self.tool_results = []
         self.tool_seconds = []
 
-    async def turn(self, text, origin="user", on_delta=None):
+    async def turn(self, text, origin="user", on_delta=None, on_tool=None):
         for args in self._calls:
             t0 = time.monotonic()
+            # The real brain fires this as the CLI reports each tool_use; the
+            # server uses it to bin narration written before the tool ran.
+            if on_tool:
+                on_tool()
             self.tool_results.append(await self._server.tool_steer_session(args))
             self.tool_seconds.append(time.monotonic() - t0)
         if on_delta:

@@ -667,6 +667,34 @@ NOTHING_TO_REPLAY_LINE = "I'm afraid I've nothing to repeat yet, sir."
 # noise. So: a banner and an orb state for the duration, and nothing said.
 ROTATION_BUSY_LINE = "Gathering my thoughts — one moment, sir."
 
+# Said by the user, not by JARVIS. A memory writer is refused for as long as
+# anything foreign sits in the generation that would compose it — a web page,
+# a README, or, as happened live, a website on the user's own screen. The
+# refusal tells him to say it again "in a fresh conversation", and until now
+# there was no way for him to start one: no command, no tool, nothing in the
+# persona. The advice was unactionable and the fact went unsaved.
+#
+# This is that fresh conversation. It discards the tainted generation rather
+# than carrying anything across, which is the whole point — he restates the
+# fact in his own words to a brain that has read nothing.
+FRESH_START_PHRASES = (
+    "start fresh", "start a fresh conversation", "fresh conversation",
+    "start over", "clear your head", "clear your mind", "clear your context",
+    "new conversation", "forget this conversation", "wipe your memory of this",
+)
+FRESH_START_LINE = "Cleared, sir — nothing of that conversation left. Go ahead."
+
+
+def _is_fresh_start(text: str) -> bool:
+    """Whether the user just asked for a clean generation."""
+    t = " ".join(_action_words(text))
+    return any(p in t for p in FRESH_START_PHRASES)
+
+
+def _action_words(text: str) -> list[str]:
+    import re as _re
+    return _re.findall(r"[a-z]+", text.lower())
+
 
 async def _on_brain_state(state: str, info: dict) -> None:
     if state == "failed" and info.get("failure_reason") == "auth":
@@ -1021,6 +1049,32 @@ async def _ask_for_journal(timeout: Optional[float] = None) -> Optional[str]:
         return None
     text = (result.text or "").strip()
     return text or None
+
+
+async def _start_fresh() -> None:
+    """Throw the current generation away at the user's word.
+
+    Not `_maybe_rotate`: that waits for the brain to decide it is full. This
+    is the user saying it now, because something he wants remembered cannot be
+    written until the context composing it is clean.
+    """
+    global _pending_handover, _handover_collected
+    if brain_instance is None:
+        return
+    async with _rotation_lock:
+        # No handover. Carrying a summary across would carry the tainted text
+        # with it, which is exactly what the memory-writer gate exists to stop.
+        _pending_handover, _handover_collected = None, False
+        try:
+            await brain_instance.rotate(handover=None)
+        except Exception as e:
+            log.error(f"fresh start failed: {e}", exc_info=True)
+            if speech is not None:
+                await speech.say("I couldn't clear it, sir.", Priority.NORMAL)
+            return
+    log.info("fresh start: generation discarded at the user's request")
+    if speech is not None:
+        await speech.say(FRESH_START_LINE, Priority.NORMAL)
 
 
 async def _maybe_rotate() -> None:
@@ -1498,6 +1552,75 @@ async def stop_session_watcher() -> None:
 TURN_SETTLE_TIMEOUT = 120.0
 
 
+class _OneLinePerTurn:
+    """A turn that uses a tool says exactly one thing, at the end.
+
+    Everything the brain writes is spoken the instant it is written, and it
+    narrates around its tools: "Will say that to the session." — tool — "Saying
+    this to it now." — tool — "Passed that to chitauri, sir." Three sentences
+    for one instruction, all saying the same thing, and the user has to sit
+    through every one of them before he can speak again.
+
+    Asking him not to does not hold: the rule is in the persona, he follows it
+    for a while, and then he does not. So the mouth is closed here instead.
+
+    Two shapes, decided by whether a tool is used at all:
+
+    * No tool — ordinary conversation. The first line is held for `hold_for`
+      to see whether a tool follows; when none does it is released and the
+      rest of the turn streams as it always did. Nothing is slower except that
+      opening sentence, and only by that much.
+    * A tool — everything written before the LAST tool call is binned, because
+      all of it is narration of something not yet done. What survives is
+      whatever he writes after his final tool: the report. It is spoken once,
+      when the turn ends.
+    """
+
+    def __init__(self, sink, hold_for: float = 0.6):
+        self._sink = sink
+        self._hold_for = hold_for
+        self._held: list[str] = []
+        self._streaming = False     # released: everything now goes straight out
+        self._tool_seen = False
+        self._deadline = None
+
+    def delta(self, d: str) -> None:
+        if self._streaming:
+            self._sink(d)
+            return
+        if self._deadline is None:
+            self._deadline = time.monotonic() + self._hold_for
+        self._held.append(d)
+        # Only a turn that has NOT touched a tool may start streaming on the
+        # timer. Once one has, the rest of the turn is held to the end, so a
+        # second round of narration cannot slip out between two tools.
+        if not self._tool_seen and time.monotonic() >= self._deadline:
+            self._flush()
+            self._streaming = True
+
+    def tool_started(self) -> None:
+        """A tool call: everything written up to here was an intention."""
+        if self._held:
+            log.info("speech: dropped narration before a tool: %r",
+                     "".join(self._held)[:60])
+        self._held.clear()
+        self._tool_seen = True
+        self._streaming = False     # hold again; more tools may follow
+
+    def finish(self) -> None:
+        """End of turn: say the one thing that survived."""
+        self._flush()
+        self._streaming = True
+
+    def _flush(self) -> None:
+        if not self._held:
+            return
+        text = "".join(self._held)
+        self._held.clear()
+        if text.strip():
+            self._sink(text)
+
+
 async def _handle_utterance(text: str) -> None:
     """One user utterance → one brain turn → streamed speech. Runs as a task so
     the socket loop keeps receiving `played` acks and interim text meanwhile."""
@@ -1518,8 +1641,11 @@ async def _handle_utterance(text: str) -> None:
     try:
         try:
             try:
+                hold = _OneLinePerTurn(lambda d: speech.feed(utt, d))
                 result = await brain_instance.turn(text, origin="user",
-                                                   on_delta=lambda d: speech.feed(utt, d))
+                                                   on_delta=hold.delta,
+                                                   on_tool=hold.tool_started)
+                hold.finish()    # the one line this turn is allowed
             finally:
                 await speech.end_turn(utt)  # a turn that never ends would wedge the mouth
         except Exception as e:
@@ -6485,8 +6611,38 @@ async def voice_handler(ws: WebSocket):
             if speech is None:
                 continue
             kind = msg.get("type")
+            if kind == "mic":
+                # The browser's recogniser is the one part of the voice path
+                # whose failures were invisible from here: it can go deaf with
+                # no error the server ever sees, and the only trace was in a
+                # console nobody had open. Its lifecycle now lands in this log
+                # next to the transcripts, so "he did not hear me" can be read
+                # back rather than guessed at. Text only, length-capped, and
+                # it drives nothing.
+                log.info("mic: %s", str(msg.get("text", ""))[:120])
+                continue
+            if kind == "hush":
+                # The user pressed the key, or the button. Deliberately NOT a
+                # spoken word: over a speaker his own voice comes back through
+                # the microphone garbled, and a mis-hear that happens to look
+                # like "stop" would cut him off constantly. A keystroke cannot
+                # be misheard.
+                #
+                # keep_unread=False: this is "be quiet", not "hold that
+                # thought" — nothing is saved to say later.
+                log.info("hush: stopped by the user")
+                await speech.barge_in(keep_unread=False, reason="hush (key)")
+                continue
             if kind == "interim":
-                await speech.user_interim(str(msg.get("text", "")))
+                # Logged because its ABSENCE is the diagnosis. A session that
+                # is capturing but returning nothing looks identical, from
+                # every other line in this log, to one that is deaf: no
+                # transcript either way. An interim says the microphone is
+                # live and the recogniser is working, and that whatever went
+                # wrong happened after this point.
+                text = str(msg.get("text", ""))
+                log.info("mic-hears: %s", text[-70:])
+                await speech.user_interim(text)
             elif kind == "played":
                 try:
                     # OverflowError is in there because `int(float('inf'))`
@@ -6520,6 +6676,9 @@ async def voice_handler(ws: WebSocket):
                     log.info(f"User ({verdict}, ignored, {ago}): {text}")
                     continue
                 log.info(f"User: {text}")
+                if _is_fresh_start(text):
+                    _spawn(_start_fresh())
+                    continue
                 _spawn(_handle_utterance(text))
     except WebSocketDisconnect:
         log.info("Voice WebSocket disconnected")

@@ -204,6 +204,23 @@ def ack_floor_seconds(audio: Optional[bytes]) -> float:
 # after the ack is a person, and dropping it eats the start of their sentence.
 # Longer utterances keep the 6s window: a whole echoed sentence needs it.
 SHORT_ECHO_GRACE_SEC = 0.75
+
+# While his audio is audible, how much of a phrase may be made of HIS OWN
+# words before it is treated as his voice coming back rather than the user's.
+#
+# The echo rule already catches his sentence returning intact. What it cannot
+# catch is the recogniser mangling it: over a speaker it returns something
+# near his words, and near is not equal, so a mis-hear reads as speech.
+# Observed live: "Found it — chitauri is idle on ..." came back as
+# 'found it guitar an', which cut him off with two chunks unplayed — the user
+# never heard the end of his question and had to ask again.
+#
+# A count of new words cannot separate these: 'found it guitar an' carries two
+# ("guitar", "an") and so does the genuine interruption "actually hold". The
+# proportion can. Half that phrase is words he was saying at that moment;
+# "actually hold" shares none of his, and "delete the file" over "Deleting the
+# staging files" shares one word in three.
+ECHO_SHARE_WHILE_AUDIBLE = 0.5
 SHORT_UTTERANCE_TOKENS = 2
 
 Synthesize = Callable[[str], Awaitable[Optional[bytes]]]
@@ -631,7 +648,7 @@ class SpeechScheduler:
             self._last_user_speech = self._clock()
             self._kick_later(self.pause_after)
             if self._speaking and self._should_interrupt(text):
-                await self.barge_in()
+                await self.barge_in(reason=f"heard {text[:40]!r}")
         return verdict
 
     def _should_interrupt(self, text: str) -> bool:
@@ -655,6 +672,24 @@ class SpeechScheduler:
         a STEM of something he is saying.
         """
         novel = self._nonmatching(text)
+        # While his audio is actually coming out of the speaker, the room is
+        # full of his voice and the recogniser garbles it into words he never
+        # said. Observed live: "found it guitar an" cut him off mid-sentence
+        # with two chunks unplayed. Token matching cannot catch that — a
+        # mis-hear matches nothing he said, which is exactly what makes it
+        # look like speech.
+        #
+        # So the bar rises while he is audibly speaking. Real interruptions
+        # still get through: a cancel word on its own (below), and anything
+        # long enough that garbling is an implausible explanation.
+        # `_since_last_ack` is the classifier's question — "how long has the
+        # room been quiet" — and it is 0.0 for exactly as long as a chunk is
+        # sent and unacked, i.e. while his voice is audible.
+        # `seconds_since_last_played` looks similar and is for the log: it
+        # answers `inf` until something has been acked, which would leave this
+        # guard switched off for the whole first utterance.
+        if self._since_last_ack() == 0.0 and self._echo_share(text) >= ECHO_SHARE_WHILE_AUDIBLE:
+            return False
         if novel >= 2:
             # The general bar is untouched, stems included: a real follow-up
             # that happens to share roots with what he is saying ("delete the
@@ -664,6 +699,22 @@ class SpeechScheduler:
         if " ".join(toks) not in self.cancel_words or novel < 1:
             return False
         return not self._is_stem_echo(toks)
+
+    def _echo_share(self, text: str) -> float:
+        """What proportion of these words are ones he is saying right now.
+
+        Whole-token, like `_nonmatching`, and for the same reason: a stem rule
+        here would swallow real follow-ups that share roots with him. This
+        only has to separate a mangled echo (half his words or more) from an
+        interruption that merely brushes against them.
+        """
+        toks = _tokens(text)
+        if not toks:
+            return 1.0                     # nothing said is not the user talking
+        recent = self._recent_tokens()
+        if not recent:
+            return 0.0
+        return sum(1 for t in toks if t in recent) / len(toks)
 
     def _is_stem_echo(self, toks: list) -> bool:
         """Is every one of these words just a clipped form of something he is
@@ -700,7 +751,8 @@ class SpeechScheduler:
             # forget —". A single-word replay trigger ("repeat", "pardon")
             # would not otherwise clear the >=2 non-matching bar, so it is
             # named explicitly rather than relying on word count.
-            await self.barge_in(keep_unread=(verdict != "cancel"))
+            await self.barge_in(keep_unread=(verdict != "cancel"),
+                                reason=f"{verdict}: {text[:40]!r}")
         return verdict
 
     async def replay_last(self) -> bool:
@@ -794,8 +846,17 @@ class SpeechScheduler:
                 u.held_ack = -1
                 self._accept_ack(u, u.id, idx, now)
 
-    async def barge_in(self, keep_unread: bool = True) -> None:
+    async def barge_in(self, keep_unread: bool = True, reason: str = "") -> None:
         """The user is talking: stop everything now."""
+        cur = self._current
+        # Barging in and resuming are the only things that make him say the
+        # same sentence twice, and neither left any trace at all — which is
+        # why "he repeated himself three times" could not be explained from
+        # a log. Record what cut him off, and what was left unsaid.
+        if cur is not None and not cur.done:
+            log.info("speech: barge-in on utterance %s%s; %d chunk(s) unplayed",
+                     cur.id, f" ({reason})" if reason else "",
+                     max(0, len(cur.chunks) - cur.played - 1))
         cur = self._current
         # Flag first, emit second: a send loop suspended in an await sees the
         # flag before it can emit anything after our `stop`.
@@ -1056,6 +1117,8 @@ class SpeechScheduler:
         while synthesis for later chunks is still running."""
         bridge = Chunk(self.bridges[u.resumes % len(self.bridges)])
         u.resumes += 1
+        log.info("speech: resuming utterance %s (resume %d of %d) from chunk %d",
+                 u.id, u.resumes, MAX_RESUMES, u.played + 1)
         pos = u.played + 1
         u.chunks.insert(pos, bridge)
         if u.high_sent >= pos:

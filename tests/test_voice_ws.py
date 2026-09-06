@@ -20,7 +20,7 @@ class FakeBrain:
     async def stop(self):
         pass
 
-    async def turn(self, text, origin="user", on_delta=None):
+    async def turn(self, text, origin="user", on_delta=None, on_tool=None):
         from brain import TurnResult
         self.turns.append((text, origin))
         out = f"Echo: {text}."
@@ -187,7 +187,7 @@ def test_lifespan_builds_brain_without_spawning_under_test(client):
 # ── failure paths (from the Task 7 review) ──────────────────────────────
 
 class ExplodingBrain(FakeBrain):
-    async def turn(self, text, origin="user", on_delta=None):
+    async def turn(self, text, origin="user", on_delta=None, on_tool=None):
         self.turns.append((text, origin))
         raise RuntimeError("boom")
 

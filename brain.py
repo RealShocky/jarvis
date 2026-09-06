@@ -334,6 +334,8 @@ class TurnResult:
 class _Turn:
     """Bookkeeping for the one turn in flight."""
 
+    on_tool: Optional[Callable[[], None]] = None
+
     def __init__(self, origin: str, on_delta: Optional[DeltaCallback],
                  proc: Optional[asyncio.subprocess.Process] = None):
         self.origin = origin
@@ -990,13 +992,17 @@ class Brain:
             return True
 
     async def turn(self, text: str, origin: str = "user",
-                   on_delta: Optional[DeltaCallback] = None) -> TurnResult:
+                   on_delta: Optional[DeltaCallback] = None,
+                   on_tool: Optional[Callable[[], None]] = None) -> TurnResult:
         """One user message in, one completed turn out. Turns are serialized."""
-        return await self._turn(text, origin, on_delta, timeout=self.config.turn_timeout)
+        return await self._turn(text, origin, on_delta, timeout=self.config.turn_timeout,
+                                on_tool=on_tool)
 
-    async def _turn(self, text, origin, on_delta, timeout, warmup: bool = False) -> TurnResult:
+    async def _turn(self, text, origin, on_delta, timeout, warmup: bool = False,
+                    on_tool=None) -> TurnResult:
         async with self._turn_lock:
-            result = await self._turn_locked(text, origin, on_delta, timeout, warmup)
+            result = await self._turn_locked(text, origin, on_delta, timeout, warmup,
+                                             on_tool=on_tool)
         # Deliberately outside the lock: a listener that reacts to
         # `rotation_needed` by rotating would otherwise deadlock against it.
         if not warmup and result.stop_reason == "result":
@@ -1004,7 +1010,7 @@ class Brain:
         return result
 
     async def _turn_locked(self, text, origin, on_delta, timeout,
-                           warmup: bool = False) -> TurnResult:
+                           warmup: bool = False, on_tool=None) -> TurnResult:
         """The body of a turn. The caller holds the turn lock."""
         proc = self._proc
         # Only the warm-up runs before `ready`; everything else must wait for
@@ -1018,6 +1024,7 @@ class Brain:
         if not warmup and self._rate_limited():
             return TurnResult(origin, "", "rate_limited", rate_limit=self.rate_limit)
         t = _Turn(origin, on_delta, proc)
+        t.on_tool = on_tool
         self._inflight = t
         try:
             line = json.dumps({"type": "user", "message": {"role": "user", "content": text}})
@@ -1133,6 +1140,15 @@ class Brain:
                     continue
                 if block.get("type") == "tool_use":
                     t.tools.append(str(block.get("name")))
+                    # Anything he wrote before reaching for a tool was
+                    # narration of an intention, not a report of a result.
+                    # The listener uses this to throw it away before it is
+                    # spoken; see server.py's `_HoldFirstLine`.
+                    if t.on_tool:
+                        try:
+                            t.on_tool()
+                        except Exception as e:
+                            log.warning(f"tool listener failed: {e}")
                 elif block.get("type") == "text" and block.get("text"):
                     t.assistant_text.append(str(block["text"]))
         elif kind == "rate_limit_event":
