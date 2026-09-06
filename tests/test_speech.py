@@ -1556,3 +1556,60 @@ async def test_an_ack_in_flight_across_a_preemption_still_counts():
         assert u.played == 2, "chunk 2 really was sent; that ack is genuine"
     finally:
         await s.stop()
+
+
+# ── his own voice, garbled ──────────────────────────────────────────────────
+# The echo rule matches TOKENS against what he just said. Over a speaker the
+# recogniser rarely returns his words intact — it returns something near them,
+# and near is not equal, so the mis-hear reads as the user talking. Observed
+# live: "Found it — chitauri is idle on ..." came back as
+# 'found it guitar an' and cut him off with two chunks still unplayed.
+
+@pytest.mark.asyncio
+async def test_a_garbled_mis_hear_does_not_cut_him_off_mid_sentence(h):
+    s = h.sched
+    await s.say("Found it — chitauri is idle on project status "
+                "and deployment planning. Shall I tell it?")
+    await asyncio.sleep(0.1)
+    assert s.is_speaking
+
+    await s.user_interim("found it guitar an")
+
+    assert s.is_speaking, "his own voice, garbled, must not interrupt him"
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_word_still_interrupts_while_he_is_audible(h):
+    """The bar rises for garbled echo, not for the user."""
+    s = h.sched
+    await s.say("Found it — chitauri is idle on project status.")
+    await asyncio.sleep(0.1)
+    await s.user_interim("stop")
+    assert not s.is_speaking
+
+
+@pytest.mark.asyncio
+async def test_a_real_instruction_still_interrupts_while_he_is_audible(h):
+    """Long enough that garbling is not a plausible explanation."""
+    s = h.sched
+    await s.say("Found it — chitauri is idle on project status.")
+    await asyncio.sleep(0.1)
+    await s.user_interim("actually cancel that and check the other one")
+    assert not s.is_speaking
+
+
+@pytest.mark.asyncio
+async def test_the_quiet_room_bar_returns_once_his_audio_has_ended(h):
+    """Two new words is right in the gap after he stops — that is the user
+    speaking into silence, not his voice coming back."""
+    s = h.sched
+    await s.say("Found it.")
+    await h.ack_all()
+    await asyncio.sleep(0.05)
+    u = s.begin_turn()
+    s.feed(u, "Shall I tell it?")
+    await s.end_turn(u)
+    await asyncio.sleep(0.05)
+    await h.ack_all()
+    await asyncio.sleep(0.05)
+    assert not s.is_speaking

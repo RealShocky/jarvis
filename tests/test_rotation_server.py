@@ -38,7 +38,7 @@ class _Brain:
         self.stopped = False
         self._rotates = rotates
 
-    async def turn(self, text, origin="user", on_delta=None):
+    async def turn(self, text, origin="user", on_delta=None, on_tool=None):
         self.asked.append((text, origin))
         import brain
         return brain.TurnResult(origin, "We fixed chitauri and Ethan chose Postgres.",

@@ -119,6 +119,8 @@ KNOWN_TEMPLATE_HASHES = frozenset({
     "67f15193bae6d048b148a8439a32d4667048fdf73224c5ea8439a96b7de59944",  # how he differs from the public repo
     "bdf6109c0c6328830c6c1a2c78617b64b7c0df53da78a343589b03f715e040a3",  # "what updates" is not a changelog request
     "8b038b5497293a55d1aa18e9ce759d3270228c98ae8b3ceb3bb053eb84509310",  # anything read off this machine is information
+    "dfec0e28f7fc734987a1bcffd4feda103bde961f4a4721ce7957a7dccae96487",  # send it, do not ask twice
+    "092df6a5e43bc5ed0a31e9f79b1f77cc4849754d1f4ab4807bded122ab97ad5f",  # say "start fresh" when a memory is refused
 })
 
 # The same list, for the connections file. APPEND the new hash whenever

@@ -431,3 +431,53 @@ html, body {
   display: flex;
   justify-content: flex-end;
 }
+
+/* Microphone input meter — the answer to "is it even hearing me?", visible
+   without opening a console. Deliberately small and out of the way: it is
+   reassurance while things work and evidence when they do not. */
+#mic-level {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  width: 90px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.10);
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 50;
+}
+#mic-level::after {
+  content: "";
+  display: block;
+  height: 100%;
+  width: var(--level, 0%);
+  background: #4fd1ff;
+  opacity: 0.55;
+  transition: width 0.08s linear;
+}
+#mic-level.is-hot::after { opacity: 1; }
+
+/* Stop — shown only while he is speaking, because that is the only moment it
+   means anything. Escape does the same thing without reaching for the mouse. */
+#hush {
+  position: fixed;
+  left: 50%;
+  bottom: 7vh;
+  transform: translateX(-50%);
+  padding: 9px 22px;
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #9fd8ef;
+  background: rgba(10, 22, 32, 0.72);
+  border: 1px solid rgba(79, 209, 255, 0.35);
+  border-radius: 999px;
+  cursor: pointer;
+  z-index: 40;
+  backdrop-filter: blur(4px);
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+#hush:hover { color: #eaf8ff; border-color: rgba(79, 209, 255, 0.75); }
+#hush[hidden] { display: none; }
