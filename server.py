@@ -30,7 +30,7 @@ from pathlib import Path
 #
 # One function rather than three copies because the copies disagreed. The
 # writer forbade three characters — "\n", "\r", "\0" — and `str.splitlines()`
-# splits on ten, so `{"user_name": "Ethan\x0bJARVIS_CLAUDE_PATH=/tmp/evil"}`
+# splits on ten, so `{"user_name": "Tony\x0bJARVIS_CLAUDE_PATH=/tmp/evil"}`
 # came back 200 and `_read_env()` then reported JARVIS_CLAUDE_PATH=/tmp/evil.
 # That is the binary the brain is spawned from, and /api/restart is one call
 # away. Extending the blocklist to ten characters would have left the same
@@ -6257,7 +6257,7 @@ def tool_recall(args: dict) -> str:
     The brief's original formatting glued `h["name"]` straight into the
     sentence for every kind. That's a filename, not a word a butler would
     say: a memory's name is a slugified title
-    ("ethan-prefers-postgres-over-sqlite") and a journal's name is a
+    ("tony-prefers-postgres-over-sqlite") and a journal's name is a
     timestamp ("2026-09-03-133912-123456-manual") — both read as noise, and
     this project already treats reading a raw identifier aloud as a defect
     (see `tool_list_sessions`/CLAUDE.md: "never say a roster name like

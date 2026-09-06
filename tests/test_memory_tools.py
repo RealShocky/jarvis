@@ -20,19 +20,19 @@ class _WatcherTurn:
 
 def test_remember_writes_a_file_and_indexes_it(wired):
     server = wired
-    out = server.tool_remember({"title": "Ethan prefers Postgres",
+    out = server.tool_remember({"title": "Tony prefers Postgres",
                                 "body": "Said during chitauri work.",
                                 "hook": "database preference"})
 
     import jarvis_memory as jm
-    assert "ethan-prefers-postgres" in jm.list_memories()
+    assert "tony-prefers-postgres" in jm.list_memories()
     assert any("database preference" in ln for ln in jm.index_lines())
     assert "remember" in out.lower() or "noted" in out.lower()
 
 
 def test_recall_finds_what_was_remembered(wired):
     server = wired
-    server.tool_remember({"title": "Ethan prefers Postgres", "body": "for chitauri",
+    server.tool_remember({"title": "Tony prefers Postgres", "body": "for chitauri",
                           "hook": "db"})
 
     out = server.tool_recall({"query": "postgres"})
@@ -45,16 +45,16 @@ def test_recall_says_so_plainly_when_it_finds_nothing(wired):
 
 
 def test_recall_never_speaks_a_memorys_raw_slug(wired):
-    """A memory's filename is a slugified title ("ethan-prefers-postgres");
+    """A memory's filename is a slugified title ("tony-prefers-postgres");
     read aloud that's noise, not a sentence — see tool_list_sessions's own
     rule against ever saying a roster name like hammer-4b out loud."""
     server = wired
-    server.tool_remember({"title": "Ethan prefers Postgres over SQLite",
+    server.tool_remember({"title": "Tony prefers Postgres over SQLite",
                           "body": "for chitauri", "hook": "db"})
 
     out = server.tool_recall({"query": "postgres"})
 
-    assert "ethan-prefers-postgres" not in out.lower()
+    assert "tony-prefers-postgres" not in out.lower()
 
 
 def test_recall_never_speaks_a_journal_entrys_raw_timestamp(wired):
